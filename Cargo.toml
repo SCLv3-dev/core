@@ -1,9 +1,60 @@
-[workspace]
-resolver = "2"
-members = [
-    "scl-macro",
-    "scl-core",
-    "scl-webview",
-    "scl-gui-widgets",
-    "scl-gui-animation"
+[package]
+name = "scl-core"
+description = "A fully featured minecraft launcher core. (Highly unstable and all in Chinese!)"
+version = "1.0.2"
+homepage = "https://github.com/Steve-xmh/scl"
+repository = "https://github.com/Steve-xmh/scl"
+license = "LGPL-3.0-only"
+readme = "README.md"
+authors = ["Steve-xmh <stevexmh@qq.com>"]
+edition = "2021"
+rust-version = "1.75"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "^1.0"
+base64 = "^0.21"
+futures = "^0.3.21"
+surf = { version = "^2.3", default-features = false, features = [ "h1-client" ] }
+image = { version = "^0.24", default-features = false, features = ["jpeg", "png", "gif", "bmp", "rgb"] }
+webp = "^0.2"
+nom = "^7.1"
+once_cell = "^1.7"
+path-absolutize = "^3.0"
+serde = { version = "^1.0", features = ["derive"] }
+serde_json = "^1.0"
+sha1_smol = { version = "^1.0", features = ["std"] }
+shell-words = "^1.0"
+smol = "^2"
+toml = "^0.8"
+url = "^2.2"
+urlencoding = "^2.1"
+concat-string = "^1.0"
+md5 = "^0.7"
+zip = "^0.6.2"
+dirs = "^5.0"
+shellwords = "1.1.0"
+fs_extra = "1.3.0"
+tracing = "^0.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "^0.52"
+
+[target.'cfg(target_os = "windows")'.dependencies.windows]
+version = "0.52"
+features = [
+    "Win32_System_Diagnostics_Debug",
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "^0.2"
+# nix = { version =  "*", features = ["feature"] }
