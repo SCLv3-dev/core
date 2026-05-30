@@ -38,8 +38,6 @@ pub enum DownloadSource {
     ///
     /// 为了支持镜像源，在这里鼓励大家前去支持一下：<https://afdian.net/a/bangbang93>
     BMCLAPI,
-    /// 全部使用 MCBBS 提供的镜像源下载
-    MCBBS,
     /// 使用符合 BMCLAPI 镜像链接格式的自定义镜像源下载
     Custom(url::Url),
 }
@@ -58,7 +56,6 @@ impl Display for DownloadSource {
             match self {
                 DownloadSource::Default => "默认（官方）下载源",
                 DownloadSource::BMCLAPI => "BMCLAPI 下载源",
-                DownloadSource::MCBBS => "MCBBS 下载源",
                 DownloadSource::Custom(_) => "自定义",
             }
         )
@@ -72,7 +69,6 @@ impl FromStr for DownloadSource {
         match s {
             "Offical" => Ok(Self::Default),
             "BMCLAPI" => Ok(Self::BMCLAPI),
-            "MCBBS" => Ok(Self::MCBBS),
             s => {
                 let url = s.parse::<url::Url>();
                 if let Ok(url) = url {

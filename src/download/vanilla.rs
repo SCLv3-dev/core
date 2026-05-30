@@ -73,7 +73,6 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
             DownloadSource::BMCLAPI => {
                 "https://bmclapi2.bangbang93.com/mc/game/version_manifest.json"
             }
-            DownloadSource::MCBBS => "https://download.mcbbs.net/mc/game/version_manifest.json",
             _ => "https://piston-meta.mojang.com/mc/game/version_manifest.json",
         })
         .await
@@ -119,11 +118,9 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 DownloadSource::BMCLAPI => {
                     format!("https://bmclapi2.bangbang93.com{}", path.path())
                 }
-                DownloadSource::MCBBS => format!("https://download.mcbbs.net{}", path.path()),
                 _ => format!("https://launcher.mojang.com{}", path.path()),
             },
             format!("https://bmclapi2.bangbang93.com{}", path.path()),
-            format!("https://download.mcbbs.net{}", path.path()),
             format!("https://launcher.mojang.com{}", path.path()),
         ];
         crate::http::download(&uris, save_path, 0)
@@ -171,11 +168,9 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 DownloadSource::BMCLAPI => {
                     format!("https://bmclapi2.bangbang93.com/maven/{path}")
                 }
-                DownloadSource::MCBBS => format!("https://download.mcbbs.net/maven/{path}"),
                 _ => format!("https://libraries.minecraft.net/{path}"),
             },
             format!("https://bmclapi2.bangbang93.com/maven/{path}"),
-            format!("https://download.mcbbs.net/maven/{path}"),
             format!("https://libraries.minecraft.net/{path}"),
         ];
         crate::http::download(&default_uris, &full_path, 0)
@@ -214,11 +209,9 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 DownloadSource::BMCLAPI => {
                     format!("https://bmclapi2.bangbang93.com{p}")
                 }
-                DownloadSource::MCBBS => format!("https://download.mcbbs.net{p}"),
                 _ => format!("https://launchermeta.mojang.com{p}"),
             },
             format!("https://bmclapi2.bangbang93.com{p}"),
-            format!("https://download.mcbbs.net{p}"),
             format!("https://launchermeta.mojang.com{p}"),
         ];
         for uri in &uris {
@@ -282,13 +275,9 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 DownloadSource::BMCLAPI => {
                     format!("https://bmclapi2.bangbang93.com/assets/{sub_hash}/{sha1}")
                 }
-                DownloadSource::MCBBS => {
-                    format!("https://download.mcbbs.net/assets/{sub_hash}/{sha1}")
-                }
                 _ => format!("https://resources.download.minecraft.net/{sub_hash}/{sha1}"),
             },
             format!("https://bmclapi2.bangbang93.com/assets/{sub_hash}/{sha1}"),
-            format!("https://download.mcbbs.net/assets/{sub_hash}/{sha1}"),
             format!("https://resources.download.minecraft.net/{sub_hash}/{sha1}"),
         ];
         crate::http::download(&uris, &full_path, 0)
@@ -612,7 +601,6 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
         let res = crate::http::retry_get_bytes(match self.source {
             DownloadSource::Default => format!("https://launchermeta.mojang.com{url_path}"),
             DownloadSource::BMCLAPI => format!("https://bmclapi2.bangbang93.com{url_path}"),
-            DownloadSource::MCBBS => format!("https://download.mcbbs.net{url_path}"),
             _ => format!("https://launchermeta.mojang.com{url_path}"),
         })
         .await
