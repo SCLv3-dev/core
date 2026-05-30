@@ -32,9 +32,12 @@ use std::{
 
 use crate::prelude::*;
 
-const API_KEY: Option<&str> = std::option_env!("CURSEFORGE_API_KEY");
 const BASE_URL: &str = "https://api.curseforge.com/v1/";
 const BASE_URL_SEARCH: &str = "https://api.curseforge.com/v1/mods/search?gameId=432&classId=6";
+
+fn api_key() -> String {
+    std::env::var("CURSEFORGE_API_KEY").unwrap_or_default()
+}
 
 #[derive(Debug, Deserialize)]
 struct Response<T> {
@@ -195,7 +198,7 @@ pub async fn search_mods(
     }
     tracing::trace!("Searching by {base_url}");
     let data: Response<Vec<ModInfo>> = crate::http::get(&base_url)
-        .header("x-api-key", API_KEY.unwrap_or_default())
+        .header("x-api-key", api_key())
         .await
         .map_err(|e| anyhow::anyhow!(e))?
         .body_json()
@@ -207,7 +210,7 @@ pub async fn search_mods(
 /// 通过模组在 Curseforge 的 ID 获取详情信息
 pub async fn get_mod_info(modid: u64) -> DynResult<ModInfo> {
     let data: Response<ModInfo> = crate::http::get(&(format!("{BASE_URL}mods/{modid}")))
-        .header("x-api-key", API_KEY.unwrap_or_default())
+        .header("x-api-key", api_key())
         .await
         .map_err(|e| anyhow::anyhow!(e))?
         .body_json()
@@ -219,7 +222,7 @@ pub async fn get_mod_info(modid: u64) -> DynResult<ModInfo> {
 /// 获取模组在 Curseforge 的 ID 获取可下载的模组文件列表
 pub async fn get_mod_files(modid: u64) -> DynResult<Vec<ModFile>> {
     let data: Response<Vec<ModFile>> = crate::http::get(&format!("{BASE_URL}mods/{modid}/files"))
-        .header("x-api-key", API_KEY.unwrap_or_default())
+        .header("x-api-key", api_key())
         .await
         .map_err(|e| anyhow::anyhow!(e))?
         .body_json()
