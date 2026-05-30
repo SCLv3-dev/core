@@ -4,7 +4,6 @@ pub mod authlib;
 pub mod curseforge;
 pub mod fabric;
 pub mod forge;
-pub mod mcmod;
 pub mod modrinth;
 pub mod neoforge;
 pub mod optifine;
