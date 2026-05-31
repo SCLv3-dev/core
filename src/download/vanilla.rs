@@ -3,7 +3,7 @@
 use std::{borrow::Cow, collections::HashMap, path::Path};
 
 use anyhow::Context;
-use inner_future::{fs::create_dir_all, io::AsyncWriteExt};
+use tokio::{fs::create_dir_all, io::AsyncWriteExt};
 use tracing::*;
 
 use super::{
@@ -88,7 +88,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
         r.set_message(format!("正在下载原版 {name}"));
         if std::path::Path::new(&save_path).is_file() {
             if self.verify_data {
-                let mut file = inner_future::fs::OpenOptions::new()
+                let mut file = tokio::fs::OpenOptions::new()
                     .read(true)
                     .open(&save_path)
                     .await?;
@@ -102,7 +102,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 return Ok(());
             }
         } else {
-            inner_future::fs::create_dir_all(
+            tokio::fs::create_dir_all(
                 &save_path[..save_path
                     .rfind(std::path::is_separator)
                     .unwrap_or(save_path.len())],
@@ -139,7 +139,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
         r.add_max_progress(1.);
         if std::path::Path::new(&full_path).is_file() {
             if self.verify_data {
-                let mut file = inner_future::fs::OpenOptions::new()
+                let mut file = tokio::fs::OpenOptions::new()
                     .read(true)
                     .open(&full_path)
                     .await?;
@@ -153,7 +153,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 return Ok(());
             }
         } else {
-            inner_future::fs::create_dir_all(
+            tokio::fs::create_dir_all(
                 &full_path[..full_path
                     .rfind(std::path::is_separator)
                     .unwrap_or(full_path.len())],
@@ -190,7 +190,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
         let r = self.reporter.sub();
         r.set_message(format!("正在下载原版资源索引 {name}"));
         let full_path = format!("{save_path}/indexes/{name}.json");
-        inner_future::fs::create_dir_all(
+        tokio::fs::create_dir_all(
             &full_path[..full_path
                 .rfind(std::path::is_separator)
                 .unwrap_or(full_path.len())],
@@ -217,7 +217,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
         for uri in &uris {
             let res = crate::http::retry_get_bytes(uri).await;
             if let Ok(res) = res {
-                inner_future::fs::write(full_path, &res).await?;
+                tokio::fs::write(full_path, &res).await?;
                 return Ok(serde_json::from_slice(&res)?);
             }
         }
@@ -246,7 +246,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
             is_asset_exists(sha1, save_path)
         } {
             if self.verify_data {
-                let mut file = inner_future::fs::OpenOptions::new()
+                let mut file = tokio::fs::OpenOptions::new()
                     .read(true)
                     .open(&full_path)
                     .await?;
@@ -260,7 +260,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 return Ok(());
             }
         }
-        inner_future::fs::create_dir_all(
+        tokio::fs::create_dir_all(
             &full_path[..full_path
                 .rfind(std::path::is_separator)
                 .unwrap_or(full_path.len())],
@@ -437,10 +437,10 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
                 .join("1.0")
                 .join("log4j-patch");
             if !lib_path.is_dir() {
-                inner_future::fs::create_dir_all(&lib_path).await?;
+                tokio::fs::create_dir_all(&lib_path).await?;
             }
             let log4j_path = lib_path.join("log4j-patch-agent-1.0.jar");
-            inner_future::fs::OpenOptions::new()
+            tokio::fs::OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
@@ -606,7 +606,7 @@ impl<R: Reporter> VanillaDownloadExt for Downloader<R> {
         .await
         .map_err(|e| anyhow::anyhow!("下载版本元数据失败：{:?}", e))?;
 
-        inner_future::fs::write(&version_file, &res).await?;
+        tokio::fs::write(&version_file, &res).await?;
 
         self.reporter
             .set_message(format!("正在下载游戏文件 {version_name}"));
@@ -636,7 +636,7 @@ const NATIVE_EXTS: &[&str] = &["dll", "so", "dylib", "jnilib"];
 pub async fn unzip_natives(unzip_file: &str, unzip_dir: &str) -> DynResult {
     let unzip_file = unzip_file.to_owned();
     let unzip_dir = unzip_dir.to_owned();
-    inner_future::unblock(move || -> DynResult {
+    tokio::task::spawn_blocking(move || -> DynResult {
         let file = std::fs::File::open(&unzip_file)?;
         let dir = std::path::PathBuf::from(unzip_dir);
         let mut archive = zip::ZipArchive::new(file)
@@ -667,5 +667,5 @@ pub async fn unzip_natives(unzip_file: &str, unzip_dir: &str) -> DynResult {
         }
         Ok(())
     })
-    .await
+    .await?
 }

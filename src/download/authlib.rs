@@ -33,25 +33,36 @@ impl<R: Reporter> AuthlibDownloadExt for Downloader<R> {
             }
             _ => "https://authlib-injector.yushi.moe/artifact/latest.json",
         })
-        .recv_json()
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
         r.add_progress(1.);
         r.set_message(format!("正在下载 Authlib-Injector {}", latest_data.version));
         let download_url = latest_data.download_url;
         let resp = crate::http::get(download_url)
+            .send()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
         let temp_dest_path = format!("{dest_path}.tmp");
-        let f = inner_future::fs::OpenOptions::new()
+        let mut f = tokio::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
             .create(true)
             .open(&temp_dest_path)
             .await?;
-        inner_future::io::copy(resp, f).await?;
+        let mut stream = resp.bytes_stream();
+        use futures::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            tokio::io::AsyncWriteExt::write_all(&mut f, &chunk).await?;
+        }
+        tokio::io::AsyncWriteExt::flush(&mut f).await?;
+        drop(f);
         r.add_progress(1.);
-        inner_future::fs::rename(temp_dest_path, dest_path).await?;
+        tokio::fs::rename(temp_dest_path, dest_path).await?;
         Ok(())
     }
 
@@ -63,7 +74,7 @@ impl<R: Reporter> AuthlibDownloadExt for Downloader<R> {
         );
         let p = std::path::Path::new(&dest_path);
         if !p.is_file() {
-            inner_future::fs::create_dir_all(p.parent().unwrap()).await?;
+            tokio::fs::create_dir_all(p.parent().unwrap()).await?;
             self.download_authlib_injector(&dest_path).await?;
         }
         Ok(())

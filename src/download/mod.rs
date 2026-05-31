@@ -108,7 +108,7 @@ pub struct Downloader<R> {
     /// 下载并发量
     parallel_amount: usize,
     /// 下载并发锁
-    pub(crate) parallel_lock: inner_future::lock::Semaphore,
+    pub(crate) parallel_lock: tokio::sync::Semaphore,
     /// 下载的进度报告对象
     pub reporter: Option<R>,
 }
@@ -155,9 +155,9 @@ impl<R: Reporter> Clone for Downloader<R> {
             verify_data: self.verify_data,
             java_path: self.java_path.clone(),
             parallel_lock: if self.parallel_amount == 0 {
-                inner_future::lock::Semaphore::new(usize::MAX)
+                tokio::sync::Semaphore::new(usize::MAX)
             } else {
-                inner_future::lock::Semaphore::new(self.parallel_amount)
+                tokio::sync::Semaphore::new(self.parallel_amount)
             },
             reporter: self.reporter.clone(),
             parallel_amount: self.parallel_amount,
@@ -199,9 +199,9 @@ impl<R: Reporter> Downloader<R> {
     pub fn with_parallel_amount(mut self, limit: usize) -> Self {
         self.parallel_amount = limit;
         if limit == 0 {
-            self.parallel_lock = inner_future::lock::Semaphore::new(usize::MAX);
+            self.parallel_lock = tokio::sync::Semaphore::new(usize::MAX);
         } else {
-            self.parallel_lock = inner_future::lock::Semaphore::new(limit);
+            self.parallel_lock = tokio::sync::Semaphore::new(limit);
         }
         self
     }
@@ -236,7 +236,7 @@ impl<R: Reporter> Default for Downloader<R> {
             },
             reporter: None,
             parallel_amount: 64,
-            parallel_lock: inner_future::lock::Semaphore::new(64),
+            parallel_lock: tokio::sync::Semaphore::new(64),
         }
     }
 }
@@ -277,40 +277,36 @@ impl<R: Reporter> GameDownload for Downloader<R> {
             std::path::Path::new(&self.minecraft_path).join("launcher_profiles.json");
 
         if !launcher_profiles_path.exists() {
-            inner_future::fs::create_dir_all(launcher_profiles_path.parent().unwrap()).await?;
-            inner_future::fs::write(launcher_profiles_path, r#"{"profiles":{},"selectedProfile":null,"authenticationDatabase":{},"selectedUser":{"account":"00000111112222233333444445555566","profile":"66666555554444433333222221111100"}}"#).await?;
+            tokio::fs::create_dir_all(launcher_profiles_path.parent().unwrap()).await?;
+            tokio::fs::write(launcher_profiles_path, r#"{"profiles":{},"selectedProfile":null,"authenticationDatabase":{},"selectedUser":{"account":"00000111112222233333444445555566","profile":"66666555554444433333222221111100"}}"#).await?;
         }
 
         if !fabric.is_empty() {
-            crate::prelude::inner_future::future::try_zip(
+            tokio::try_join!(
                 self.install_vanilla(version_name, &vanilla),
                 self.download_fabric_pre(version_name, &vanilla.id, fabric),
-            )
-            .await?;
+            )?;
             self.download_fabric_post(version_name).await?;
         } else if !quiltmc.is_empty() {
-            crate::prelude::inner_future::future::try_zip(
+            tokio::try_join!(
                 self.install_vanilla(version_name, &vanilla),
                 self.download_quiltmc_pre(version_name, &vanilla.id, quiltmc),
-            )
-            .await?;
+            )?;
             self.download_quiltmc_post(version_name).await?;
         } else if !forge.is_empty() {
             self.install_vanilla(&vanilla.id, &vanilla).await?; // Forge 安装需要原版，如果安装器没有解析到则会从官方源下载，速度很慢
-            crate::prelude::inner_future::future::try_zip(
+            tokio::try_join!(
                 self.install_vanilla(version_name, &vanilla),
                 self.install_forge_pre(version_name, &vanilla.id, forge),
-            )
-            .await?;
+            )?;
             self.install_forge_post(version_name, &vanilla.id, forge)
                 .await?;
         } else if !neoforge.is_empty() {
             self.install_vanilla(&vanilla.id, &vanilla).await?; // NeoForge 安装需要原版，如果安装器没有解析到则会从官方源下载，速度很慢
-            crate::prelude::inner_future::future::try_zip(
+            tokio::try_join!(
                 self.install_vanilla(version_name, &vanilla),
                 self.install_neoforge_pre(version_name, &vanilla.id, neoforge),
-            )
-            .await?;
+            )?;
             self.install_neoforge_post(version_name, &vanilla.id, neoforge)
                 .await?;
         } else {

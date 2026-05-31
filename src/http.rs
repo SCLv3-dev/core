@@ -2,95 +2,36 @@
 //!
 //! 或者在二次开发的时候更换成你喜欢的版本
 
-use std::{convert::TryInto, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use once_cell::sync::Lazy;
 use serde::de::DeserializeOwned;
-use surf::*;
+use tokio::io::AsyncWriteExt;
 
 use crate::prelude::*;
 
-#[allow(dead_code)]
-fn logger(
-    req: Request,
-    client: Client,
-    next: middleware::Next,
-) -> futures::future::BoxFuture<Result<Response>> {
-    Box::pin(async move {
-        let url = req.url().to_string();
-        let should_log = std::env::var("SCL_HTTP_LOG")
-            .map(|x| &x == "true")
-            .unwrap_or(false);
-        if should_log {
-            tracing::trace!("[SCL-Core-HTTP] 正在请求 {url}");
-        }
-        let res = next.run(req, client).await?;
-        if let Some(content_type) = res.content_type() {
-            if should_log {
-                tracing::trace!(
-                    "[SCL-Core-HTTP] 请求 {} 完成 状态码：{} 响应类型：{}",
-                    url,
-                    res.status(),
-                    content_type
-                );
-                if res.status().is_redirection() {
-                    tracing::trace!(
-                        "[SCL-Core-HTTP] 正在重定向至 {}",
-                        res.header("Location").map(|x| x.as_str()).unwrap_or("")
-                    );
-                }
-            }
-        } else if should_log {
-            tracing::trace!(
-                "[SCL-Core-HTTP] 请求 {} 完成 状态码：{} 响应类型：无",
-                url,
-                res.status()
-            );
-            if res.status().is_redirection() {
-                tracing::trace!(
-                    "[SCL-Core-HTTP] 正在重定向至 {}",
-                    res.header("Location").map(|x| x.as_str()).unwrap_or("")
-                );
-            }
-        }
-        Ok(res)
-    })
-}
-
-static GLOBAL_CLIENT: Lazy<Arc<Client>> = Lazy::new(|| {
+static GLOBAL_CLIENT: Lazy<Arc<reqwest::Client>> = Lazy::new(|| {
     let scl_version = std::option_env!("SCL_VERSION_TYPE").unwrap_or("0.0.0");
-    let client = Config::new()
-        .add_header(
-            "User-Agent",
-            format!("SharpCraftLauncher/{scl_version} (github.com/Steve-xmh/SharpCraftLauncher) (stevexmh@qq.com)"),
-        )
-        .unwrap()
-        .set_timeout(Some(Duration::from_secs(30)))
-        .set_http_keep_alive(false) // async-h1 似乎不兼容使用 Keep Alive，会导致解析响应出错
-        .set_max_connections_per_host(1024);
-    let client = if let Ok(mut proxy) = std::env::var("HTTP_PROXY") {
-        let proxy = if proxy.ends_with('/') {
-            proxy
-        } else {
-            proxy.push('/');
-            proxy
-        };
-        if let Ok(uri) = url::Url::parse(&proxy) {
-            tracing::trace!("Using http proxy: {uri}");
-            client.set_base_url(uri)
-        } else {
-            client
+    let mut builder = reqwest::Client::builder()
+        .user_agent(format!(
+            "SharpCraftLauncher/{scl_version} (github.com/Steve-xmh/SharpCraftLauncher) (stevexmh@qq.com)"
+        ))
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .pool_max_idle_per_host(1024);
+
+    if let Ok(proxy) = std::env::var("HTTP_PROXY") {
+        if let Ok(parsed) = reqwest::Proxy::all(&proxy) {
+            tracing::trace!("Using http proxy: {}", proxy);
+            builder = builder.proxy(parsed);
         }
-    } else {
-        client
-    };
-    let client: Client = client.try_into().unwrap();
-    Arc::new(client.with(middleware::Redirect::default()))
+    }
+
+    let client = builder.build().expect("Failed to build HTTP client");
+    Arc::new(client)
 });
 
 /// Future 重试调用函数，为下载文件失败重试而准备
-///
-/// 主要是 surf 库不带重试功能，中间件写了也有大堆问题。。。
 pub async fn retry_future<O, F: std::future::Future<Output = O>>(
     max_retries: usize,
     future_builder: impl Fn() -> F,
@@ -107,6 +48,30 @@ pub async fn retry_future<O, F: std::future::Future<Output = O>>(
     }
 }
 
+/// 将 HTTP 响应流式写入文件
+async fn stream_response_to_file(
+    res: reqwest::Response,
+    dest_path: &str,
+) -> DynResult {
+    let tmp_dest_path = format!("{dest_path}.tmp");
+    let mut file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .create(true)
+        .open(&tmp_dest_path)
+        .await?;
+    let mut stream = res.bytes_stream();
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
+    drop(file);
+    tokio::fs::rename(tmp_dest_path, dest_path).await?;
+    Ok(())
+}
+
 /// 根据所给链接，依次尝试请求下载
 ///
 /// 启发自 PCL1 源代码
@@ -118,21 +83,15 @@ pub async fn download(
     _size: usize,
 ) -> DynResult {
     for uri in uris {
-        // 尝试重试两次，都失败的话就换下一个链接
-        let res = retry_future(5, || get(uri), surf::Result::is_ok).await;
+        let res = retry_future(5, || get(uri).send(), |r| r.is_ok()).await;
         match res {
             Ok(Ok(res)) => {
                 if res.status().is_success() {
-                    let tmp_dest_path = format!("{dest_path}.tmp");
-                    let tmp_file = inner_future::fs::OpenOptions::new()
-                        .create(true)
-                        .write(true)
-                        .truncate(true)
-                        .open(&tmp_dest_path)
-                        .await?;
-                    if inner_future::io::copy(res, tmp_file).await.is_ok() {
-                        inner_future::fs::rename(tmp_dest_path, dest_path).await?;
-                        return Ok(());
+                    match stream_response_to_file(res, dest_path).await {
+                        Ok(()) => return Ok(()),
+                        Err(e) => {
+                            tracing::trace!("Error {uri:?} 写入文件失败 {e}");
+                        }
                     }
                 } else {
                     tracing::trace!("Error {:?} 状态码错误 {}", uri, res.status());
@@ -157,69 +116,48 @@ pub async fn download(
 ///
 /// 返回的数据结构需要实现 [`serde::de::DeserializeOwned`]
 pub async fn retry_get_json<D: DeserializeOwned>(uri: impl AsRef<str>) -> DynResult<D> {
-    let res = retry_future(5, || get(uri.as_ref()).recv_json(), surf::Result::is_ok).await;
-    let err = match res {
-        Ok(Ok(body)) => return Ok(body),
-        Ok(Err(e)) => {
-            anyhow::anyhow!("{}", e)
-        }
-        Err(e) => e,
-    };
-    anyhow::bail!(
-        "轮询请求链接 {} 失败，请检查你的网络连接：{}",
-        uri.as_ref(),
-        err
+    let res = retry_future(
+        5,
+        || async { get(uri.as_ref()).send().await?.json::<D>().await },
+        |r: &Result<D, reqwest::Error>| r.is_ok(),
     )
+    .await?;
+    res.map_err(|e| anyhow::anyhow!("轮询请求链接 {} 失败，请检查你的网络连接：{}", uri.as_ref(), e))
 }
 
 /// 重试获取数据
 pub async fn retry_get_bytes(uri: impl AsRef<str>) -> DynResult<Vec<u8>> {
-    let res = retry_future(5, || get(uri.as_ref()).recv_bytes(), surf::Result::is_ok).await;
-    let err = match res {
-        Ok(Ok(body)) => return Ok(body),
-        Ok(Err(e)) => {
-            anyhow::anyhow!("{}", e)
-        }
-        Err(e) => e,
-    };
-    anyhow::bail!(
-        "轮询请求链接 {} 失败，请检查你的网络连接：{}",
-        uri.as_ref(),
-        err
+    let res = retry_future(
+        5,
+        || async {
+            let b = get(uri.as_ref()).send().await?.bytes().await?;
+            Ok::<Vec<u8>, reqwest::Error>(b.to_vec())
+        },
+        |r: &Result<Vec<u8>, reqwest::Error>| r.is_ok(),
     )
+    .await?;
+    res.map_err(|e| anyhow::anyhow!("轮询请求链接 {} 失败，请检查你的网络连接：{}", uri.as_ref(), e))
 }
 
 /// 重试获取字符串
 pub async fn retry_get_string(uri: impl AsRef<str>) -> DynResult<String> {
-    let res = retry_future(5, || get(uri.as_ref()).recv_string(), surf::Result::is_ok).await;
-    let err = match res {
-        Ok(Ok(body)) => return Ok(body),
-        Ok(Err(e)) => {
-            anyhow::anyhow!("{}", e)
-        }
-        Err(e) => e,
-    };
-    anyhow::bail!(
-        "轮询请求链接 {} 失败，请检查你的网络连接：{}",
-        uri.as_ref(),
-        err
+    let res = retry_future(
+        5,
+        || async { get(uri.as_ref()).send().await?.text().await },
+        |r: &Result<String, reqwest::Error>| r.is_ok(),
     )
+    .await?;
+    res.map_err(|e| anyhow::anyhow!("轮询请求链接 {} 失败，请检查你的网络连接：{}", uri.as_ref(), e))
 }
 
 /// 重试获取响应，当取得成功时返回
 ///
 /// 你可能需要自行确认状态码是否成功
-pub async fn retry_get(uri: impl AsRef<str>) -> DynResult<Response> {
-    let res = retry_future(5, || get(uri.as_ref()), surf::Result::is_ok).await;
+pub async fn retry_get(uri: impl AsRef<str>) -> DynResult<reqwest::Response> {
+    let res = retry_future(5, || get(uri.as_ref()).send(), |r| r.is_ok()).await;
     let err = match res {
         Ok(Ok(body)) => return Ok(body),
-        Ok(Err(e)) => {
-            anyhow::anyhow!(
-                "{}: {}",
-                e,
-                e.backtrace().map(|x| x.to_string()).unwrap_or_default()
-            )
-        }
+        Ok(Err(e)) => anyhow::anyhow!("{}", e),
         Err(e) => e,
     };
     anyhow::bail!(
@@ -230,13 +168,13 @@ pub async fn retry_get(uri: impl AsRef<str>) -> DynResult<Response> {
 }
 
 /// 生成简单的 GET 请求
-pub fn get(uri: impl AsRef<str>) -> RequestBuilder {
-    GLOBAL_CLIENT.get(uri)
+pub fn get(uri: impl AsRef<str>) -> reqwest::RequestBuilder {
+    GLOBAL_CLIENT.get(uri.as_ref())
 }
 
 /// 生成简单的 POST 请求
-pub fn post(uri: impl AsRef<str>) -> RequestBuilder {
-    GLOBAL_CLIENT.post(uri)
+pub fn post(uri: impl AsRef<str>) -> reqwest::RequestBuilder {
+    GLOBAL_CLIENT.post(uri.as_ref())
 }
 
 /// 针对 Mojang 验证 API 的响应结构
@@ -251,7 +189,6 @@ pub enum RequestResult<T> {
 /// 不会进行重试的 HTTP 请求模块
 pub mod no_retry {
     use serde::{de::DeserializeOwned, Serialize};
-    pub use surf::get;
 
     use super::RequestResult;
     use crate::prelude::DynResult;
@@ -260,9 +197,11 @@ pub mod no_retry {
     ///
     /// 返回的数据结构需要实现 [`serde::de::DeserializeOwned`]
     pub async fn get_data<D: DeserializeOwned>(uri: &str) -> DynResult<RequestResult<D>> {
-        let result = surf::get(uri)
-            .middleware(surf::middleware::Redirect::default())
-            .recv_string()
+        let result = super::get(uri)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("无法接收来自 {} 的响应：{:?}", uri, e))?
+            .text()
             .await
             .map_err(|e| anyhow::anyhow!("无法接收来自 {} 的响应：{:?}", uri, e))?;
         if let Ok(result) = serde_json::from_str(&result) {
@@ -282,11 +221,13 @@ pub mod no_retry {
         uri: &str,
         body: &S,
     ) -> DynResult<RequestResult<D>> {
-        let result = surf::post(uri)
+        let result = super::post(uri)
             .header("Content-Type", "application/json; charset=utf-8")
-            .body_json(body)
+            .json(body)
+            .send()
+            .await
             .map_err(|e| anyhow::anyhow!("无法解析请求主体给 {}：{:?}", uri, e))?
-            .recv_string()
+            .text()
             .await
             .map_err(|e| anyhow::anyhow!("无法接收来自 {} 的响应：{:?}", uri, e))?;
         if let Ok(result) = serde_json::from_str(&result) {

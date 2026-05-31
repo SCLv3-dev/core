@@ -143,7 +143,7 @@ impl Mod {
     /// 尝试获取模组的元数据信息
     pub async fn try_get_mod_meta(&self) -> DynResult<ModMeta> {
         let path = self.path.to_owned();
-        inner_future::unblock(move || -> DynResult<ModMeta> {
+        tokio::task::spawn_blocking(move || -> DynResult<ModMeta> {
             let mut z = zip::ZipArchive::new(
                 std::fs::OpenOptions::new()
                     .read(true)
@@ -155,10 +155,8 @@ impl Mod {
                 serde_json::from_reader::<_, FabricModMeta>(r)
                     .map_err(|_| zip::result::ZipError::InvalidArchive("fabric.mod.json"))
             }) {
-                // fabric.mod.json https://github.com/FabricMC/fabric-example-mod/blob/1.19/src/main/resources/fabric.mod.json
                 Ok(ModMeta::Fabric(meta))
             } else if let Ok(meta) = z.by_name("mods.toml").and_then(|mut r| {
-                // mods.toml https://docs.minecraftforge.net/en/1.19.x/gettingstarted/structuring/
                 let mut buf = String::with_capacity(r.size() as _);
                 r.read_to_string(&mut buf).unwrap_or_default();
                 toml::from_str::<NewForgeModMeta>(&buf)
@@ -168,7 +166,6 @@ impl Mod {
                     || anyhow::anyhow!("Can't get mod info from mcmod.info"),
                 )?))
             } else if let Ok(meta) = z.by_name("mcmod.info").and_then(|r| {
-                // mcmod.info https://docs.minecraftforge.net/en/1.12.x/gettingstarted/structuring/
                 serde_json::from_reader::<_, Vec<ForgeModMeta>>(r)
                     .map_err(|_| zip::result::ZipError::InvalidArchive("mcmod.info"))
             }) {
@@ -179,7 +176,7 @@ impl Mod {
                 anyhow::bail!("Mod name not found")
             }
         })
-        .await
+        .await?
     }
 
     /// [`Mod::try_get_mod_meta`] 的语法糖，尝试根据模组元数据获取模组名称
@@ -202,14 +199,14 @@ impl Mod {
             ModMeta::Forge(meta) => meta.logo_file,
         };
         let path = self.path.to_owned();
-        inner_future::unblock(move || -> DynResult<DynamicImage> {
+        tokio::task::spawn_blocking(move || -> DynResult<DynamicImage> {
             let mut z = zip::ZipArchive::new(std::fs::OpenOptions::new().read(true).open(path)?)?;
             let mut r = z.by_name(icon_path.trim_start_matches(['/', '\\']))?;
             let mut buf = Vec::with_capacity(r.size() as _);
             r.read_to_end(&mut buf)?;
             Ok(image::load_from_memory(&buf)?)
         })
-        .await
+        .await?
     }
 
     /// 如果模组是禁用的（既以 `.jar.disabled` 结尾），启用该模组（既还原成 `.jar` 结尾）
@@ -219,7 +216,7 @@ impl Mod {
         if self.file_name.ends_with(".disabled") && !self.enabled {
             let mut path = self.path.clone();
             path.set_file_name(&self.file_name[..self.file_name.len() - 9]);
-            inner_future::fs::rename(&self.path, &path).await?;
+            tokio::fs::rename(&self.path, &path).await?;
             self.file_name = path.file_name().unwrap().to_string_lossy().to_string();
             self.path = path;
             self.enabled = true;
@@ -240,7 +237,7 @@ impl Mod {
                     .map(|x| x.to_string_lossy())
                     .unwrap_or_default()
             ));
-            inner_future::fs::rename(&self.path, &path).await?;
+            tokio::fs::rename(&self.path, &path).await?;
             self.file_name = path.file_name().unwrap().to_string_lossy().to_string();
             self.path = path;
             self.enabled = false;
@@ -250,7 +247,7 @@ impl Mod {
 
     /// 删除该模组，**此操作不可撤销**
     pub async fn remove(self) -> DynResult {
-        inner_future::fs::remove_file(self.path).await?;
+        tokio::fs::remove_file(self.path).await?;
         Ok(())
     }
 }

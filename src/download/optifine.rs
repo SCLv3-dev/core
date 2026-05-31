@@ -2,7 +2,7 @@
 //!
 //! 因 Optifine 并不提供一个稳定的下载方式，故此处会使用镜像源的额外 API 来获取版本下载信息
 
-use inner_future::io::AsyncWriteExt;
+use tokio::io::AsyncWriteExt;
 
 use super::{structs::OptifineVersionMeta, Downloader};
 use crate::prelude::*;
@@ -104,7 +104,7 @@ impl<R: Reporter> OptifineDownloadExt for Downloader<R> {
                     .join("mods")
                     .join(mod_file_name)
             };
-            inner_future::fs::create_dir_all(mod_path.parent().unwrap()).await?;
+            tokio::fs::create_dir_all(mod_path.parent().unwrap()).await?;
             self.download_optifine(
                 vanilla_version,
                 optifine_type,
@@ -123,7 +123,7 @@ impl<R: Reporter> OptifineDownloadExt for Downloader<R> {
                 optifine_type = optifine_type,
                 optifine_patch = optifine_patch,
             );
-            inner_future::fs::create_dir_all(std::path::Path::new(&full_path).parent().unwrap())
+            tokio::fs::create_dir_all(std::path::Path::new(&full_path).parent().unwrap())
                 .await?;
             self.download_optifine(
                 vanilla_version,
@@ -139,11 +139,11 @@ impl<R: Reporter> OptifineDownloadExt for Downloader<R> {
                 self.minecraft_library_path.as_str()
             );
 
-            inner_future::fs::create_dir_all(
+            tokio::fs::create_dir_all(
                 std::path::Path::new(&installer_path).parent().unwrap(),
             )
             .await?;
-            let mut file = inner_future::fs::OpenOptions::new()
+            let mut file = tokio::fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
@@ -154,11 +154,11 @@ impl<R: Reporter> OptifineDownloadExt for Downloader<R> {
             let _ = file.sync_all().await;
 
             #[cfg(not(windows))]
-            let mut cmd = inner_future::process::Command::new(&self.java_path);
+            let mut cmd = tokio::process::Command::new(&self.java_path);
             #[cfg(windows)]
             let mut cmd = {
-                use inner_future::process::windows::CommandExt;
-                let mut cmd = inner_future::process::Command::new(&self.java_path);
+                use tokio::process::windows::CommandExt;
+                let mut cmd = tokio::process::Command::new(&self.java_path);
                 cmd.creation_flags(0x08000000);
                 cmd
             };

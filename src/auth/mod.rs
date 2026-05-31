@@ -10,7 +10,7 @@ use structs::mojang::{ProfileResponse, ProfileTexture};
 
 use self::structs::AuthMethod;
 use crate::{
-    http::{no_retry::*, RequestResult},
+    http::{no_retry::post_data, RequestResult},
     password::Password,
     prelude::*,
 };
@@ -77,9 +77,10 @@ async fn get_head_skin(uuid: &str) -> DynResult<(Vec<u8>, Vec<u8>)> {
     // https://sessionserver.mojang.com/session/minecraft/profile/{uuid}
     let uri = format!("https://sessionserver.mojang.com/session/minecraft/profile/{uuid}");
     let result: ProfileResponse = crate::http::get(uri)
+        .send()
         .await
         .map_err(|e| anyhow::anyhow!(e))?
-        .body_json()
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     if let Some(prop) = result
@@ -95,9 +96,13 @@ async fn get_head_skin(uuid: &str) -> DynResult<(Vec<u8>, Vec<u8>)> {
                 let skin_url = skin.url;
                 parse_head_skin(
                     crate::http::get(skin_url)
-                        .recv_bytes()
+                        .send()
                         .await
-                        .map_err(|e| anyhow::anyhow!(e))?,
+                        .map_err(|e| anyhow::anyhow!(e))?
+                        .bytes()
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?
+                        .to_vec(),
                 )
             } else {
                 Ok(Default::default())
@@ -165,8 +170,9 @@ pub async fn refresh_auth(am: &mut AuthMethod, client_token: &str) -> DynResult<
                 client_token: client_token.to_owned(),
             };
             let result = crate::http::post("https://authserver.mojang.com/validate")
-                .body(serde_json::to_vec(&body)?)
                 .header("Content-Type", "application/json")
+                .body(serde_json::to_vec(&body)?)
+                .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("发送用户信息请求失败，可能是网络问题：{:?}", e))?;
             if result.status().is_success() {
@@ -180,6 +186,7 @@ pub async fn refresh_auth(am: &mut AuthMethod, client_token: &str) -> DynResult<
             let profile_resp =
                 crate::http::get("https://api.minecraftservices.com/minecraft/profile")
                     .header("Authorization", &format!("Bearer {}", &access_token))
+                    .send()
                     .await
                     .map_err(|e| {
                         anyhow::anyhow!("发送用户信息请求失败，有可能是网络问题：{:?}", e)

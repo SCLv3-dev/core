@@ -95,7 +95,10 @@ pub async fn get_xuid(userhash: &str, token: &str) -> DynResult<String> {
         .header("Accept", "application/json")
         .header("Accept-Language", "zh-CN")
         .header("Host", "userpresence.xboxlive.com")
-        .recv_string()
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?
+        .text()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(res)
@@ -115,8 +118,11 @@ pub async fn request_token(credit: &str, is_refresh: bool) -> DynResult<(Passwor
     );
     let res: OAuth20TokenResponse = crate::http::post(MICROSOFT_TOKEN_URL)
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body.as_bytes())
-        .recv_json()
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     anyhow::ensure!(
@@ -138,10 +144,11 @@ pub async fn get_userhash_and_token(access_token: &str) -> DynResult<(String, St
         crate::http::post("https://user.auth.xboxlive.com/user/authenticate")
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            .body(xbox_auth_body.as_bytes())
+            .body(xbox_auth_body)
+            .send()
             .await
             .map_err(|e| anyhow::anyhow!(e))?
-            .body_json()
+            .json()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
     let token = xbox_auth_resp.token.to_owned();
@@ -153,10 +160,11 @@ pub async fn get_userhash_and_token(access_token: &str) -> DynResult<(String, St
             crate::http::post("https://xsts.auth.xboxlive.com/xsts/authorize")
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .body(xsts_body.as_bytes())
+                .body(xsts_body)
+                .send()
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?
-                .body_json()
+                .json()
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
         let xsts_token = xsts_resp.token;
@@ -177,10 +185,11 @@ pub async fn get_mojang_access_token(uhs: &str, xsts_token: &str) -> DynResult<P
             crate::http::post("https://api.minecraftservices.com/authentication/login_with_xbox")
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .body(minecraft_xbox_body.as_bytes())
+                .body(minecraft_xbox_body)
+                .send()
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?
-                .body_string()
+                .text()
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
         let minecraft_xbox_resp: MinecraftXBoxLoginResponse =
@@ -237,9 +246,10 @@ pub async fn start_auth(_ctx: Option<impl Reporter>, url: &str) -> DynResult<Aut
                         "Authorization",
                         &format!("Bearer {}", access_token.as_string()),
                     )
+                    .send()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?
-                    .body_json()
+                    .json()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?;
             if mcstore_resp.items.is_empty() {
@@ -253,19 +263,22 @@ pub async fn start_auth(_ctx: Option<impl Reporter>, url: &str) -> DynResult<Aut
                         "Authorization",
                         &format!("Bearer {}", access_token.as_string()),
                     )
+                    .send()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?
-                    .body_json()
+                    .json()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?;
             if profile_resp.error.is_empty() {
                 if let Some(skin) = profile_resp.skins.iter().find(|a| a.state == "ACTIVE") {
                     let skin_data = crate::http::get(&skin.url)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?
-                        .body_bytes()
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?
+                    .bytes()
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?
+                    .to_vec();
                     let (head_skin, hat_skin) = parse_head_skin(skin_data)?;
                     tracing::trace!("Successfully authed!");
                     return Ok(AuthMethod::Microsoft {

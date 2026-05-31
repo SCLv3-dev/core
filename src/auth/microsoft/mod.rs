@@ -31,12 +31,15 @@ impl<T: Display> MicrosoftOAuth<T> {
         let res = crate::http::post(
             "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode?mkt=zh-CN",
         )
-        .body_string(format!(
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
             "client_id={}&scope=XboxLive.signin%20offline_access",
             self.client_id
         ))
-        .content_type("application/x-www-form-urlencoded")
-        .recv_json::<DeviceCodeResponse>()
+        .send()
+        .await
+        .map_err(|err| anyhow::anyhow!("请求设备码时发生错误：{}", err))?
+        .json::<DeviceCodeResponse>()
         .await
         .map_err(|err| anyhow::anyhow!("请求设备码时发生错误：{}", err))?;
 
@@ -47,12 +50,15 @@ impl<T: Display> MicrosoftOAuth<T> {
     pub async fn verify_device_code(&self, device_code: &str) -> DynResult<TokenResponse> {
         let res =
             crate::http::post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
-                .body_string(format!(
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(format!(
             "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id={}&device_code={}",
             self.client_id, device_code,
         ))
-                .content_type("application/x-www-form-urlencoded")
-                .recv_json::<TokenResponse>()
+                .send()
+                .await
+                .map_err(|err| anyhow::anyhow!("请求设备码时发生错误：{}", err))?
+                .json::<TokenResponse>()
                 .await
                 .map_err(|err| anyhow::anyhow!("请求设备码时发生错误：{}", err))?;
 
@@ -63,12 +69,15 @@ impl<T: Display> MicrosoftOAuth<T> {
     async fn refresh_token(&self, refresh_token: &str) -> DynResult<TokenResponse> {
         let res =
             crate::http::post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
-                .body_string(format!(
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(format!(
                     "grant_type=refresh_token&client_id={}&refresh_token={}",
                     self.client_id, refresh_token,
                 ))
-                .content_type("application/x-www-form-urlencoded")
-                .recv_json::<TokenResponse>()
+                .send()
+                .await
+                .map_err(|err| anyhow::anyhow!("请求设备码时发生错误：{}", err))?
+                .json::<TokenResponse>()
                 .await
                 .map_err(|err| anyhow::anyhow!("请求设备码时发生错误：{}", err))?;
 
@@ -96,8 +105,11 @@ impl<T: Display> MicrosoftOAuth<T> {
             crate::http::post("https://user.auth.xboxlive.com/user/authenticate")
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .body(xbox_auth_body.as_bytes())
-                .recv_json()
+                .body(xbox_auth_body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("验证 Xbox Live 账户失败：{}", e))?
+                .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("验证 Xbox Live 账户失败：{}", e))?;
         let token = xbox_auth_resp.token.to_owned();
@@ -122,8 +134,11 @@ impl<T: Display> MicrosoftOAuth<T> {
                 crate::http::post("https://xsts.auth.xboxlive.com/xsts/authorize")
                     .header("Content-Type", "application/json")
                     .header("Accept", "application/json")
-                    .body(xsts_body.as_bytes())
-                    .recv_json()
+                    .body(xsts_body)
+                    .send()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("获取 XSTS 账户失败：{}", e))?
+                    .json()
                     .await
                     .map_err(|e| anyhow::anyhow!("获取 XSTS 账户失败：{}", e))?;
             let xsts_token = xsts_resp.token;
@@ -157,9 +172,10 @@ impl<T: Display> MicrosoftOAuth<T> {
                         "Authorization",
                         &format!("Bearer {}", &access_token.as_string()),
                     )
+                    .send()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?
-                    .body_string()
+                    .text()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?;
             let mcstore_resp: MinecraftStoreResponse = serde_json::from_str(&mcstore_resp)?;
@@ -175,20 +191,23 @@ impl<T: Display> MicrosoftOAuth<T> {
                         "Authorization",
                         &format!("Bearer {}", &access_token.as_string()),
                     )
+                    .send()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?
-                    .body_json()
+                    .json()
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?;
             if profile_resp.error.is_empty() {
                 if let Some(skin) = profile_resp.skins.iter().find(|a| a.state == "ACTIVE") {
                     tracing::debug!("正在解析皮肤: {}", skin.url);
                     let skin_data = crate::http::get(&skin.url)
+                        .send()
                         .await
                         .map_err(|e| anyhow::anyhow!(e))?
-                        .body_bytes()
+                        .bytes()
                         .await
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                        .map_err(|e| anyhow::anyhow!(e))?
+                        .to_vec();
                     let (head_skin, hat_skin) =
                         crate::auth::parse_head_skin(skin_data).context("解析皮肤数据失败")?;
                     tracing::debug!("微软账户验证成功！");

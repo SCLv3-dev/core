@@ -199,9 +199,10 @@ pub async fn search_mods(
     tracing::trace!("Searching by {base_url}");
     let data: Response<Vec<ModInfo>> = crate::http::get(&base_url)
         .header("x-api-key", api_key())
+        .send()
         .await
         .map_err(|e| anyhow::anyhow!(e))?
-        .body_json()
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(data.data)
@@ -211,9 +212,10 @@ pub async fn search_mods(
 pub async fn get_mod_info(modid: u64) -> DynResult<ModInfo> {
     let data: Response<ModInfo> = crate::http::get(&(format!("{BASE_URL}mods/{modid}")))
         .header("x-api-key", api_key())
+        .send()
         .await
         .map_err(|e| anyhow::anyhow!(e))?
-        .body_json()
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(data.data)
@@ -223,9 +225,10 @@ pub async fn get_mod_info(modid: u64) -> DynResult<ModInfo> {
 pub async fn get_mod_files(modid: u64) -> DynResult<Vec<ModFile>> {
     let data: Response<Vec<ModFile>> = crate::http::get(&format!("{BASE_URL}mods/{modid}/files"))
         .header("x-api-key", api_key())
+        .send()
         .await
         .map_err(|e| anyhow::anyhow!(e))?
-        .body_json()
+        .json()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     Ok(data.data)
@@ -235,9 +238,10 @@ pub async fn get_mod_files(modid: u64) -> DynResult<Vec<ModFile>> {
 pub async fn get_mod_icon(mod_info: &ModInfo) -> DynResult<image::DynamicImage> {
     if let Some(logo) = &mod_info.logo {
         let data = crate::http::get(&logo.thumbnail_url)
+            .send()
             .await
             .map_err(|e| anyhow::anyhow!(e))?
-            .body_bytes()
+            .bytes()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
         if let Ok(img) = image::load_from_memory(&data) {
@@ -263,16 +267,23 @@ pub async fn download_mod(
     url: &str,
     dest: PathBuf,
 ) -> DynResult {
-    let mut file = inner_future::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .truncate(true)
         .write(true)
         .open(format!("{}.tmp", dest.to_str().unwrap()))
         .await?;
     let res = crate::http::get(url)
+        .send()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
-    inner_future::io::copy(res, &mut file).await?;
-    inner_future::fs::rename(format!("{}.tmp", dest.to_str().unwrap()), dest).await?;
+    let mut stream = res.bytes_stream();
+    use futures::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        tokio::io::AsyncWriteExt::write_all(&mut file, &chunk).await?;
+    }
+    tokio::io::AsyncWriteExt::flush(&mut file).await?;
+    tokio::fs::rename(format!("{}.tmp", dest.to_str().unwrap()), dest).await?;
     Ok(())
 }

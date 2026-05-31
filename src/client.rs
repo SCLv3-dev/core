@@ -6,7 +6,7 @@ use std::{
     path::Path,
 };
 
-use inner_future::process::{Child, Command};
+use tokio::process::{Child, Command};
 
 use super::{
     auth::structs::AuthMethod,
@@ -652,7 +652,7 @@ impl Client {
     pub async fn launch(&mut self) -> DynResult<u32> {
         #[cfg(windows)]
         {
-            use inner_future::process::windows::*;
+            use tokio::process::windows::*;
             self.cmd.creation_flags(0x08000000);
         }
         let c = match self.cmd.spawn() {
@@ -665,7 +665,7 @@ impl Client {
                 }
             }
         };
-        let pid = c.id();
+        let pid = c.id().ok_or_else(|| anyhow::anyhow!("failed to get pid"))?;
         self.process = Some(c);
         Ok(pid)
     }
@@ -673,7 +673,7 @@ impl Client {
     /// 如果游戏进程还在运行，则尝试停止游戏进程
     pub fn stop(&mut self) -> DynResult {
         if let Some(mut p) = self.process.take() {
-            p.kill()?;
+            p.start_kill()?;
         }
         Ok(())
     }

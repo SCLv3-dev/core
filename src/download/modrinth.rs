@@ -103,7 +103,10 @@ pub async fn get_mod_icon_by_url(url: &str) -> DynResult<DynamicImage> {
         return Ok(image::DynamicImage::ImageRgba8(img));
     }
     let data = crate::http::get(url)
-        .recv_bytes()
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?
+        .bytes()
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
     // Modrinth 允许的图片格式有： .bmp .gif .jpeg .png .svg .svgz .webp .rgb
@@ -159,7 +162,10 @@ pub async fn search_mods(
         page_size,
         search_filter
     ))
-    .recv_json()
+    .send()
+    .await
+    .map_err(|e| anyhow::anyhow!(e))?
+    .json()
     .await
     .map_err(|e| anyhow::anyhow!(e))?;
     Ok(r.hits

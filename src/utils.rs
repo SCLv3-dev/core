@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use inner_future::io::{AsyncRead, AsyncReadExt};
-use sha1_smol::*;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use sha1::{Sha1, Digest};
 
 use crate::prelude::*;
 
@@ -102,7 +102,7 @@ extern "C" {
 /// 返回一个十六进制的小写摘要字符串
 pub async fn get_data_sha1(data: &mut (impl AsyncRead + Unpin)) -> DynResult<String> {
     let mut buf = [0u8; 16];
-    let mut sha = Sha1::default();
+    let mut sha = Sha1::new();
     loop {
         let size = data.read(&mut buf).await?;
         if size > 0 {
@@ -111,7 +111,7 @@ pub async fn get_data_sha1(data: &mut (impl AsyncRead + Unpin)) -> DynResult<Str
             break;
         }
     }
-    Ok(sha.hexdigest())
+    Ok(format!("{:x}", sha.finalize()))
 }
 
 /// 返回一个相对路径的绝对路径格式
@@ -275,9 +275,9 @@ pub struct MemoryStatus {
 /// - 对于 Linux 的可执行文件格式描述，请参阅 "ELF-64 Object File Format"
 #[cfg(target_os = "windows")]
 pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<Arch> {
-    use inner_future::io::AsyncSeekExt;
+    use tokio::io::AsyncSeekExt;
 
-    let mut file = inner_future::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .read(true)
         .open(file_path.as_ref())
         .await?;
@@ -286,13 +286,11 @@ pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<
 
     file.read_exact(&mut buf).await?;
 
-    // PE Magic Number
-
     if !(buf[0] == 0x4D && buf[1] == 0x5A) {
         anyhow::bail!("文件不是一个合法的 PE 可执行文件");
     }
 
-    file.seek(inner_future::io::SeekFrom::Start(0x3C)).await?;
+    file.seek(tokio::io::SeekFrom::Start(0x3C)).await?;
 
     let mut buf = [0u8; 4];
 
@@ -300,7 +298,7 @@ pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<
 
     let pe_header_offset = u32::from_le_bytes(buf);
 
-    file.seek(inner_future::io::SeekFrom::Start(pe_header_offset as u64))
+    file.seek(tokio::io::SeekFrom::Start(pe_header_offset as u64))
         .await?;
 
     file.read_exact(&mut buf).await?;
@@ -330,7 +328,7 @@ pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<
 /// - 对于 Linux 的可执行文件格式描述，请参阅 "ELF-64 Object File Format"
 #[cfg(target_os = "macos")]
 pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<Arch> {
-    let mut file = inner_future::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .read(true)
         .open(file_path.as_ref())
         .await?;
@@ -368,9 +366,9 @@ pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<
 /// - 对于 Linux 的可执行文件格式描述，请参阅 "ELF-64 Object File Format"
 #[cfg(target_os = "linux")]
 pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<Arch> {
-    use inner_future::io::AsyncSeekExt;
+    use tokio::io::AsyncSeekExt;
 
-    let mut file = inner_future::fs::OpenOptions::new()
+    let mut file = tokio::fs::OpenOptions::new()
         .read(true)
         .open(file_path.as_ref())
         .await?;
@@ -378,13 +376,11 @@ pub async fn get_exec_arch(file_path: impl AsRef<std::path::Path>) -> DynResult<
     let mut buf = [0u8; 4];
     file.read_exact(&mut buf).await?;
 
-    // ELF Magic Number
-    // 7F 45 4C 46
     if !(buf[0] == 0x7F && buf[1] == 0x45 && buf[2] == 0x4C && buf[3] == 0x46) {
         anyhow::bail!("文件不是一个合法的 ELF 可执行文件");
     }
 
-    file.seek(inner_future::io::SeekFrom::Start(0x10)).await?;
+    file.seek(tokio::io::SeekFrom::Start(0x10)).await?;
 
     let mut buf = [0u8; 2];
     file.read_exact(&mut buf).await?;

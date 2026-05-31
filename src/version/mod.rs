@@ -5,8 +5,6 @@ use std::path::Path;
 pub mod mods;
 pub mod structs;
 
-use inner_future::stream::StreamExt;
-
 use self::structs::VersionInfo;
 use crate::prelude::*;
 
@@ -47,9 +45,9 @@ pub async fn get_avaliable_versions(
         ..Default::default()
     };
     if version_directory_path.as_ref().is_dir() {
-        let mut entries = inner_future::fs::read_dir(version_directory_path.as_ref()).await?;
+        let mut entries = tokio::fs::read_dir(version_directory_path.as_ref()).await?;
         let mut result = Vec::with_capacity(32);
-        while let Some(entry) = entries.try_next().await? {
+        while let Some(entry) = entries.next_entry().await? {
             let (created_date, access_date) = if let Ok(metadata) = entry.metadata().await {
                 (
                     metadata

@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
-use inner_future::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use serde_json::Value;
 
 use super::{
@@ -116,7 +116,7 @@ impl<R: Reporter> NeoForgeDownloadExt for Downloader<R> {
         if std::path::Path::new(&full_path).is_file() {
             return Ok(());
         }
-        inner_future::fs::create_dir_all(
+        tokio::fs::create_dir_all(
             &full_path[..full_path.rfind('/').unwrap_or(full_path.len())],
         )
         .await?;
@@ -163,9 +163,9 @@ impl<R: Reporter> NeoForgeDownloadExt for Downloader<R> {
             self.minecraft_library_path.as_str()
         );
 
-        inner_future::fs::create_dir_all(std::path::Path::new(&installer_path).parent().unwrap())
+        tokio::fs::create_dir_all(std::path::Path::new(&installer_path).parent().unwrap())
             .await?;
-        let mut file = inner_future::fs::OpenOptions::new()
+        let mut file = tokio::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
@@ -200,19 +200,20 @@ impl<R: Reporter> NeoForgeDownloadExt for Downloader<R> {
             let tmp_full_path = tmp_full_path.to_owned();
             let full_path_c = full_path.to_owned();
             let tmp_full_path_c = tmp_full_path.to_owned();
-            let (from_file, to_file) = futures::future::try_join(
-                inner_future::unblock(move || {
+            let (from_file_r, to_file_r) = tokio::join!(
+                tokio::task::spawn_blocking(move || {
                     std::fs::OpenOptions::new().read(true).open(full_path)
                 }),
-                inner_future::unblock(move || {
+                tokio::task::spawn_blocking(move || {
                     std::fs::OpenOptions::new()
                         .write(true)
                         .create(true)
                         .truncate(true)
                         .open(tmp_full_path)
                 }),
-            )
-            .await?;
+            );
+            let from_file = from_file_r??;
+            let to_file = to_file_r??;
             tracing::trace!("Modifying");
             self.modify_neoforge_installer(from_file, to_file, &version_name)
                     .await
@@ -227,11 +228,11 @@ impl<R: Reporter> NeoForgeDownloadExt for Downloader<R> {
         r.set_message("正在修改安装器参数".into());
 
         #[cfg(not(windows))]
-        let mut cmd = inner_future::process::Command::new(&self.java_path);
+        let mut cmd = tokio::process::Command::new(&self.java_path);
         #[cfg(windows)]
         let mut cmd = {
-            use inner_future::process::windows::CommandExt;
-            let mut cmd = inner_future::process::Command::new(&self.java_path);
+            use tokio::process::windows::CommandExt;
+            let mut cmd = tokio::process::Command::new(&self.java_path);
             cmd.creation_flags(0x08000000);
             cmd
         };
@@ -263,7 +264,7 @@ impl<R: Reporter> NeoForgeDownloadExt for Downloader<R> {
         let mut delay_timer = Instant::now();
 
         if let Some(stdout) = child.stdout.take() {
-            let mut stdout = inner_future::io::BufReader::new(stdout);
+            let mut stdout = tokio::io::BufReader::new(stdout);
             let mut buf = String::with_capacity(256);
             loop {
                 if let Ok(len) = stdout.read_line(&mut buf).await {
@@ -318,10 +319,10 @@ impl<R: Reporter> NeoForgeDownloadExt for Downloader<R> {
         drop(ir);
         drop(pr);
 
-        let status = child.status().await?;
+        let status = child.wait().await?;
         r.add_progress(1.);
         r.remove_progress();
-        inner_future::fs::remove_file(tmp_full_path).await?;
+        tokio::fs::remove_file(tmp_full_path).await?;
         if status.success() && install_succeed.load(std::sync::atomic::Ordering::SeqCst) {
             Ok(())
         } else {

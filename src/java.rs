@@ -1,8 +1,6 @@
 //! Java 的搜索，版本检测
 use std::path::{Path, PathBuf};
 
-use inner_future::stream::StreamExt;
-
 use crate::{
     prelude::*,
     utils::{locate_path, Arch},
@@ -79,8 +77,8 @@ async fn query_java_version_output(java_path: impl AsRef<std::ffi::OsStr>) -> Dy
     let c = {
         #[cfg(windows)]
         {
-            use inner_future::process::windows::CommandExt;
-            inner_future::process::Command::new(java_path)
+            use tokio::process::windows::CommandExt;
+            tokio::process::Command::new(java_path)
                 .arg("-version")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -89,14 +87,14 @@ async fn query_java_version_output(java_path: impl AsRef<std::ffi::OsStr>) -> Dy
         }
         #[cfg(not(windows))]
         {
-            inner_future::process::Command::new(java_path)
+            tokio::process::Command::new(java_path)
                 .arg("-version")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()?
         }
     };
-    let output = c.output().await?;
+    let output = c.wait_with_output().await?;
     Ok(String::from_utf8(output.stderr)?)
 }
 
@@ -139,8 +137,8 @@ fn get_java_version(java_version_string: &str) -> u8 {
 pub async fn search_for_java() -> Vec<String> {
     // 从安装目录中搜索 Java
     async fn check_bin_java_directory(path: impl AsRef<Path>, result: &mut Vec<String>) {
-        if let Ok(mut d) = inner_future::fs::read_dir(path).await {
-            while let Ok(Some(d)) = d.try_next().await {
+        if let Ok(mut d) = tokio::fs::read_dir(path).await {
+            while let Ok(Some(d)) = d.next_entry().await {
                 let mut path = d.path();
                 #[cfg(target_os = "macos")]
                 path.push("Contents/Home");

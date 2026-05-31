@@ -7,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use inner_future::stream::StreamExt;
 use serde::{
     de::{self, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
@@ -446,12 +445,12 @@ impl VersionInfo {
             } else {
                 if scl_config_path.is_file() {
                     // 加载启动器设置
-                    let data = inner_future::fs::read_to_string(scl_config_path).await?;
+                    let data = tokio::fs::read_to_string(scl_config_path).await?;
                     let scl_config = serde_json::from_str(data.trim_start_matches('\u{feff}'))?; // 去掉可能存在的 BOM
                     self.scl_launch_config = Some(scl_config);
                 }
                 // 解析元文件，提取数据
-                let data = inner_future::fs::read_to_string(meta_path).await?;
+                let data = tokio::fs::read_to_string(meta_path).await?;
                 let mut meta: VersionMeta =
                     serde_json::from_str(data.trim_start_matches('\u{feff}'))?; // 去掉可能存在的 BOM
                 if jar_path.is_file() {
@@ -483,7 +482,7 @@ impl VersionInfo {
         let version_base_path = Path::new(&self.version_base);
         if version_base_path.is_dir() {
             let version_path = version_base_path.join(&self.version);
-            let _ = inner_future::fs::remove_dir_all(version_path).await;
+            let _ = tokio::fs::remove_dir_all(version_path).await;
         }
     }
 
@@ -501,12 +500,12 @@ impl VersionInfo {
                 anyhow::bail!("目标版本名称已存在")
             } else {
                 if version_jar_path.is_file() {
-                    inner_future::fs::rename(version_jar_path, new_version_jar_path).await?;
+                    tokio::fs::rename(version_jar_path, new_version_jar_path).await?;
                 }
                 if version_json_path.is_file() {
-                    inner_future::fs::rename(version_json_path, new_version_json_path).await?
+                    tokio::fs::rename(version_json_path, new_version_json_path).await?
                 };
-                inner_future::fs::rename(version_path, new_version_path).await?;
+                tokio::fs::rename(version_path, new_version_path).await?;
                 self.version = new_version_name.to_owned();
                 Ok(())
             }
@@ -564,7 +563,7 @@ impl VersionInfo {
                         anyhow::bail!("无法打开 SCL 配置文件")
                     }
                 } else if scl_config_path.is_file() {
-                    inner_future::fs::remove_file(scl_config_path).await?;
+                    tokio::fs::remove_file(scl_config_path).await?;
                 }
                 Ok(())
             }
@@ -636,9 +635,9 @@ impl VersionInfo {
         if !mods_path.is_dir() {
             return Ok(vec![]);
         }
-        let mut files = inner_future::fs::read_dir(mods_path).await?;
+        let mut files = tokio::fs::read_dir(mods_path).await?;
         let mut results = vec![];
-        while let Some(file) = files.try_next().await? {
+        while let Some(file) = files.next_entry().await? {
             if file.path().is_file()
                 && file
                     .path()
@@ -718,8 +717,8 @@ impl VersionInfo {
     pub async fn get_saves(&self) -> DynResult<Vec<WorldSave>> {
         let saves_path = self.version_path().join("saves");
         let mut result = Vec::new();
-        let mut files = inner_future::fs::read_dir(&saves_path).await?;
-        while let Some(_file) = files.try_next().await? {
+        let mut files = tokio::fs::read_dir(&saves_path).await?;
+        while let Some(_file) = files.next_entry().await? {
             result.push(WorldSave {})
         }
         Ok(result)
@@ -735,14 +734,14 @@ impl VersionInfo {
         let texturepacks_path = self.version_path().join("texturepacks");
         let mut result = Vec::new();
         if resourcepacks_path.is_dir() {
-            let mut files = inner_future::fs::read_dir(&resourcepacks_path).await?;
-            while let Some(_file) = files.try_next().await? {
+            let mut files = tokio::fs::read_dir(&resourcepacks_path).await?;
+            while let Some(_file) = files.next_entry().await? {
                 result.push(ResourcesPack {})
             }
         }
         if texturepacks_path.is_dir() {
-            let mut files = inner_future::fs::read_dir(&texturepacks_path).await?;
-            while let Some(_file) = files.try_next().await? {
+            let mut files = tokio::fs::read_dir(&texturepacks_path).await?;
+            while let Some(_file) = files.next_entry().await? {
                 result.push(ResourcesPack {})
             }
         }

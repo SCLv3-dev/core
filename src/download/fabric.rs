@@ -57,7 +57,7 @@ pub trait FabricDownloadExt: Sync {
 
 impl<R: Reporter> FabricDownloadExt for Downloader<R> {
     async fn get_avaliable_loaders(&self, vanilla_version: &str) -> DynResult<Vec<LoaderMetaItem>> {
-        let mut result = crate::http::retry_get(match self.source {
+        let result = crate::http::retry_get(match self.source {
             DownloadSource::Default => {
                 format!("https://meta.fabricmc.net/v2/versions/loader/{vanilla_version}")
             }
@@ -75,7 +75,7 @@ impl<R: Reporter> FabricDownloadExt for Downloader<R> {
             )
         })?;
         if result.status().is_success() {
-            let result = result.body_json().await.map_err(|e| anyhow::anyhow!(e))?;
+            let result = result.json().await.map_err(|e| anyhow::anyhow!(e))?;
             Ok(result)
         } else {
             Ok(vec![])
@@ -86,7 +86,7 @@ impl<R: Reporter> FabricDownloadExt for Downloader<R> {
         let package_name = name.parse::<PackageName>().unwrap();
         let full_path = package_name.to_maven_jar_path(self.minecraft_library_path.as_str());
         let r = self.reporter.sub();
-        inner_future::fs::create_dir_all(
+        tokio::fs::create_dir_all(
             &full_path[..full_path.rfind('/').unwrap_or(full_path.len())],
         )
         .await
@@ -95,7 +95,7 @@ impl<R: Reporter> FabricDownloadExt for Downloader<R> {
         r.add_max_progress(1.);
         if std::path::Path::new(&full_path).is_file() {
             if self.verify_data {
-                let mut file = inner_future::fs::OpenOptions::new()
+                let mut file = tokio::fs::OpenOptions::new()
                     .read(true)
                     .open(&full_path)
                     .await?;
@@ -139,16 +139,16 @@ impl<R: Reporter> FabricDownloadExt for Downloader<R> {
         version_id: &str,
         loader_version: &str,
     ) -> DynResult {
-        let mut loader_meta_res = crate::http::retry_get(format!(
+        let loader_meta_res = crate::http::retry_get(format!(
             "https://meta.fabricmc.net/v2/versions/loader/{version_id}/{loader_version}/profile/json"
         ))
         .await
         .map_err(|e| anyhow::anyhow!("获取 Fabric 版本元数据失败：{:?}", e))?;
         let res = loader_meta_res
-            .body_bytes()
+            .bytes()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        inner_future::fs::write(
+        tokio::fs::write(
             format!(
                 "{}/{}/{}-fabric-loader.tmp.json",
                 self.minecraft_version_path.as_str(),
@@ -183,21 +183,21 @@ impl<R: Reporter> FabricDownloadExt for Downloader<R> {
             version_name,
             version_name
         );
-        let vanilla_meta = crate::prelude::inner_future::fs::read(&vanilla_path).await?;
+        let vanilla_meta = tokio::fs::read(&vanilla_path).await?;
         let loader_path = format!(
             "{}/{}/{}-fabric-loader.tmp.json",
             self.minecraft_version_path.as_str(),
             version_name,
             version_name
         );
-        let loader_meta = crate::prelude::inner_future::fs::read(&loader_path).await?;
-        inner_future::fs::remove_file(loader_path).await?;
+        let loader_meta = tokio::fs::read(&loader_path).await?;
+        tokio::fs::remove_file(loader_path).await?;
 
         let mut vanilla_meta: VersionMeta = serde_json::from_slice(&vanilla_meta)?;
         let loader_meta: VersionMeta = serde_json::from_slice(&loader_meta)?;
 
         vanilla_meta += loader_meta;
-        inner_future::fs::write(&vanilla_path, serde_json::to_vec(&vanilla_meta)?).await?;
+        tokio::fs::write(&vanilla_path, serde_json::to_vec(&vanilla_meta)?).await?;
 
         Ok(())
     }
